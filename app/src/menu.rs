@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 use std::ptr;
-use muda::{ContextMenu, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{CheckMenuItem, ContextMenu, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
 };
 use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use windows_sys::Win32::UI::WindowsAndMessaging::{CheckMenuItem, MF_BYPOSITION, MF_CHECKED};
+use windows_sys::Win32::UI::WindowsAndMessaging::{CheckMenuItem as Win32CheckMenuItem, MF_BYPOSITION, MF_CHECKED};
 
 use crate::logic::{get_all_info_text, PhoneInfo, STATE_TEXT_OFF, STATE_TEXT_ON};
 
@@ -155,7 +155,8 @@ pub fn build_tray_menu(
 
             // 1. 首项：文字随状态在「启用共享」「停用共享」间切换，点一下切换
             let toggle_title = if entry.sharing { "停用共享" } else { "启用共享" };
-            let toggle_item = MenuItem::new(toggle_title, true, None);
+            // 用带勾选态的菜单项：共享中时「停用共享」前面打勾，与主菜单的选中标记一致
+            let toggle_item = CheckMenuItem::new(toggle_title, true, entry.sharing, None);
             map.insert(
                 toggle_item.id().clone(),
                 MenuAction::ToggleSharing {
@@ -230,7 +231,7 @@ pub fn build_tray_menu(
         for (i, entry) in entries.iter().enumerate() {
             if entry.sharing {
                 unsafe {
-                    CheckMenuItem(hmenu, i as u32, MF_BYPOSITION | MF_CHECKED);
+                    Win32CheckMenuItem(hmenu, i as u32, MF_BYPOSITION | MF_CHECKED);
                 }
             }
         }

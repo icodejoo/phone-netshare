@@ -22,7 +22,8 @@ use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_GUID, NIF_INFO, NIIF_INFO, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, TranslateMessage, MSG, WM_NULL,
+    DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, SetProcessDPIAware, TranslateMessage,
+    MSG, WM_NULL,
 };
 
 use phone_netshare::adb::{
@@ -446,6 +447,8 @@ fn main() {
     // 托盘程序没有文本输入，尽早对本进程关闭输入法，避免输入法 DLL 被注入占内存
     unsafe {
         ImmDisableIME(u32::MAX);
+        // 声明 DPI 感知，托盘图标才能按真实尺寸绘制，不被系统拉伸发糊
+        SetProcessDPIAware();
     }
 
     let args: Vec<String> = std::env::args().collect();
