@@ -1,0 +1,87 @@
+# 构建便携版托盘 exe：跑测试 → release 构建 → 上传产物；推 v* 标签时自动发 Release。
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # 与 scripts/install.ps1 保持一致的 gnirehtet 版本与官方包校验值
+  GNIREHTET_VERSION: '2.5.1'
+  GNIREHTET_ZIP_SHA256: '7f5b1063e7895182aa60def1437e50363c3758144088dcd079037bb7c3c46a1c'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # gnirehtet.exe 不入库，构建前从官方发行包取并校验；apk 一并取，嵌进 exe
+      - name: 下载并校验 gnirehtet
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'gnirehtet.zip'
+          $url = "https://github.com/Genymobile/gnirehtet/releases/download/v$env:GNIREHTET_VERSION/gnirehtet-rust-win64-v$env:GNIREHTET_VERSION.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:GNIREHTET_ZIP_SHA256) { throw "sha256 不一致：$actual" }
+          $tmp = Join-Path $env:RUNNER_TEMP 'gnirehtet'
+          Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+          New-Item -ItemType Directory -Force app/assets | Out-Null
+          Get-ChildItem $tmp -Recurse -File | Where-Object Name -in 'gnirehtet.exe', 'gnirehtet.apk' | Copy-Item -Destination app/assets -Force
+          Get-ChildItem app/assets | Format-Table Name, Length
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('app/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: 单元测试
+        working-directory: app
+        run: cargo test --locked
+
+      - name: release 构建
+        working-directory: app
+        run: cargo build --release --locked
+
+      # 体积统一用 gzip -9 测
+      - name: 体积报告
+        run: |
+          $exe = 'app/target/release/phone-netshare.exe'
+          $raw = (Get-Item $exe).Length
+          $gz = & bash -c "gzip -9 -c $exe | wc -c"
+          "exe 原始 $raw 字节，gzip -9 后 $($gz.Trim()) 字节" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone-netshare-win-x64
+          path: app/target/release/phone-netshare.exe
+          if-no-files-found: error
+
+  # 只在推 v* 标签时发布
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: phone-netshare-win-x64
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" phone-netshare.exe --repo "$GITHUB_REPOSITORY" --generate-notes

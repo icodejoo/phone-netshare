@@ -47,6 +47,90 @@ function ConvertFrom-AdbDevices([string[]]$Lines) {
 #>
 function Get-Phones { ConvertFrom-AdbDevices @(adb devices -l) }
 
+# 详情里要读的系统属性：显示名 → getprop 键
+$script:InfoProps = [ordered]@{
+    model        = 'ro.product.model'
+    brand        = 'ro.product.brand'
+    manufacturer = 'ro.product.manufacturer'
+    marketname   = 'ro.product.marketname'
+    device       = 'ro.product.device'
+    release      = 'ro.build.version.release'
+    sdk          = 'ro.build.version.sdk'
+    abi          = 'ro.product.cpu.abi'
+}
+# 空值在界面上的占位
+$script:Empty = '—'
+
+<#
+.SYNOPSIS 追加一行日志到 %TEMP%\phone-netshare.log（界面事件里的异常会被 WinForms 吞掉，靠它排查）。
+.PARAMETER Message 日志内容
+#>
+function Write-NetShareLog([string]$Message) {
+    Add-Content -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) 'phone-netshare.log') -Value ('{0:HH:mm:ss} {1}' -f (Get-Date), $Message)
+}
+
+<#
+.SYNOPSIS 解析 `键=值` 形式的多行文本（只按第一个 = 拆分）。
+.PARAMETER Lines 文本行
+.OUTPUTS 有序哈希表：键 → 值（已去首尾空白）
+#>
+function ConvertFrom-KeyValueLines([string[]]$Lines) {
+    $kv = [ordered]@{}
+    foreach ($line in $Lines) {
+        $i = $line.IndexOf('=')
+        if ($i -gt 0) { $kv[$line.Substring(0, $i).Trim()] = $line.Substring($i + 1).Trim() }
+    }
+    return $kv
+}
+
+<#
+.SYNOPSIS 把读到的系统属性整理成界面要显示的「项目 → 值」列表。
+.PARAMETER Kv 属性键值（键见 InfoProps 的名字，另含 device_name）
+.PARAMETER Serial 手机序列号
+.OUTPUTS 有序哈希表：名称、型号、品牌、制造商、设备代号、系统、CPU 架构、序列号；取不到的显示「—」
+#>
+function ConvertTo-PhoneInfo($Kv, [string]$Serial) {
+    $get = { param($k) $v = $Kv[$k]; if ($v -and $v -ne 'null') { $v } else { $script:Empty } }
+    $name = @('device_name', 'marketname', 'model') | ForEach-Object { & $get $_ } | Where-Object { $_ -ne $script:Empty } | Select-Object -First 1
+    $release = & $get 'release'
+    $sdk = & $get 'sdk'
+    $os = if ($release -eq $script:Empty) { $script:Empty } else { "Android $release (SDK $sdk)" }
+    return [ordered]@{
+        '名称'    = if ($name) { $name } else { $script:Empty }
+        '型号'    = & $get 'model'
+        '品牌'    = & $get 'brand'
+        '制造商'  = & $get 'manufacturer'
+        '设备代号' = & $get 'device'
+        '系统'    = $os
+        'CPU 架构' = & $get 'abi'
+        '序列号'  = $Serial
+    }
+}
+
+<#
+.SYNOPSIS 读取一台手机的基本信息（设备名、型号、品牌、系统版本等）。
+.PARAMETER Serial 手机序列号
+.OUTPUTS 同 ConvertTo-PhoneInfo
+#>
+function Get-PhoneInfo([string]$Serial) {
+    $parts = foreach ($e in $script:InfoProps.GetEnumerator()) { "echo $($e.Key)=`$(getprop $($e.Value))" }
+    $cmd = ($parts -join '; ') + '; echo device_name=$(settings get global device_name)'
+    ConvertTo-PhoneInfo (ConvertFrom-KeyValueLines @(adb -s $Serial shell $cmd)) $Serial
+}
+
+<#
+.SYNOPSIS 给每台手机生成菜单上显示的名字：型号；多台同型号时追加序列号末 4 位区分。
+.PARAMETER Phones Get-Phones 的结果
+.OUTPUTS 与输入同序的字符串数组
+#>
+function Get-PhoneLabels($Phones) {
+    $phones = @($Phones)
+    foreach ($p in $phones) {
+        $same = @($phones | Where-Object { $_.Name -eq $p.Name }).Count
+        if ($same -gt 1) { '{0} ({1})' -f $p.Name, $p.Serial.Substring([Math]::Max(0, $p.Serial.Length - 4)) } else { $p.Name }
+    }
+}
+
 <#
 .SYNOPSIS 判断某台手机当前是否在共享电脑网络（手机上有隧道网卡）。
 .PARAMETER Serial 手机序列号
@@ -111,4 +195,4 @@ function Test-FileSha256([string]$Path, [string]$Expected) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -eq $Expected.Trim()
 }
 
-Export-ModuleMember -Function Get-GnirehtetExe, ConvertFrom-AdbDevices, Get-Phones, Test-Sharing, Test-RelayRunning, Start-Relay, Stop-RelayIfIdle, Enable-Phone, Disable-Phone, Test-FileSha256
+Export-ModuleMember -Function Write-NetShareLog, Get-GnirehtetExe, ConvertFrom-AdbDevices, ConvertFrom-KeyValueLines, ConvertTo-PhoneInfo, Get-PhoneInfo, Get-PhoneLabels, Get-Phones, Test-Sharing, Test-RelayRunning, Start-Relay, Stop-RelayIfIdle, Enable-Phone, Disable-Phone, Test-FileSha256
