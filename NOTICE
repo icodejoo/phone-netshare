@@ -1,0 +1,8 @@
+phone-netshare 使用并在安装时下载以下第三方软件，它们不属于本仓库，各自遵循其许可证：
+
+gnirehtet
+  Copyright (C) 2017 Genymobile
+  许可证：Apache License 2.0
+  项目地址：https://github.com/Genymobile/gnirehtet
+  用途：Windows 端中继程序（gnirehtet.exe）与手机端 Android App（gnirehtet.apk）。
+  获取方式：scripts/install.ps1 从官方 release 下载并校验 sha256，不随本仓库分发。
