@@ -20,6 +20,32 @@ pub const APP_PACKAGE: &str = "com.genymobile.gnirehtet";
 /// 「解除网络共享」小 App 的包名（本仓库 phone-stop 构建，随 exe 内嵌）。
 pub const STOP_APP_PACKAGE: &str = "dev.jelon.netshare.stop";
 
+/// 从 `dumpsys package <包名>` 的输出里解析已安装应用的 `versionCode`。
+///
+/// # 参数
+/// - `dump`: dumpsys 的标准输出。
+///
+/// # 返回值
+/// 取到第一处 `versionCode=N` 返回 `Some(N)`；未安装或解析失败返回 `None`。
+///
+/// # 示例
+/// ```
+/// use phone_netshare::logic::parse_version_code;
+/// assert_eq!(parse_version_code("  versionCode=3 minSdk=24"), Some(3));
+/// ```
+pub fn parse_version_code(dump: &str) -> Option<u32> {
+    let rest = dump.split("versionCode=").nth(1)?;
+    rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+/// exe 携带的小 App 版本号（编译期取自 phone-stop 清单的 versionCode）。
+pub const STOP_APP_VERSION_CODE: u32 = {
+    match u32::from_str_radix(env!("STOP_APP_VERSION_CODE"), 10) {
+        Ok(v) => v,
+        Err(_) => panic!("STOP_APP_VERSION_CODE 不是数字"),
+    }
+};
+
 /// 小 App 需要的特权权限（发 STOP 给 gnirehtet 必须），装好后由 adb 授予。
 pub const STOP_APP_PERMISSION: &str = "android.permission.WRITE_SECURE_SETTINGS";
 
@@ -299,6 +325,19 @@ pub fn get_all_info_text(sharing: bool, info: &PhoneInfo) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::parse_version_code;
+
+    #[test]
+    fn test_parse_version_code() {
+        let dump = "Packages:
+  Package [x] (1):
+    versionCode=7 minSdk=24 targetSdk=34
+    versionName=0.1.0
+";
+        assert_eq!(parse_version_code(dump), Some(7));
+        assert_eq!(parse_version_code("Unable to find package: x"), None);
+    }
+
     use super::*;
 
     #[test]

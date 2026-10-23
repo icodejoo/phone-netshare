@@ -7,7 +7,7 @@ use std::process::Command;
 use crate::assets::CREATE_NO_WINDOW;
 use crate::logic::{
     convert_from_adb_devices, convert_from_key_value_lines, convert_to_phone_info, Phone,
-    PhoneInfo, APP_PACKAGE, INFO_PROPS, STOP_APP_PERMISSION, TUN_NAME,
+    PhoneInfo, parse_version_code, APP_PACKAGE, INFO_PROPS, STOP_APP_PERMISSION, TUN_NAME,
 };
 
 /// 找不到 adb 时的标准中文提示文案。
@@ -178,16 +178,39 @@ pub fn is_app_installed(adb_path: &Path, serial: &str) -> bool {
     is_package_installed(adb_path, serial, APP_PACKAGE)
 }
 
-/// 给手机安装 APK，并授予小 App 所需的 `WRITE_SECURE_SETTINGS`。
+/// 查询手机上已安装应用的 `versionCode`。
+///
+/// # 参数
+/// - `adb_path`: adb 可执行文件路径。
+/// - `serial`: 手机序列号。
+/// - `package`: 应用包名。
+///
+/// # 返回值
+/// 已安装返回 `Some(versionCode)`；未安装或查询失败返回 `None`。
+///
+/// # 示例
+/// ```no_run
+/// use std::path::Path;
+/// use phone_netshare::adb::get_installed_version_code;
+/// let v = get_installed_version_code(Path::new("adb.exe"), "ABC12345", "dev.jelon.netshare.stop");
+/// ```
+pub fn get_installed_version_code(adb_path: &Path, serial: &str, package: &str) -> Option<u32> {
+    let out = run_adb(adb_path, &["-s", serial, "shell", "dumpsys", "package", package]).ok()?;
+    parse_version_code(&out)
+}
+
+/// 强制安装 APK 并授予小 App 所需的 `WRITE_SECURE_SETTINGS`。
+///
+/// 先 `install -r -d` 覆盖（允许降级）；失败（如签名不一致）则卸载后重装。
 ///
 /// # 参数
 /// - `adb_path`: adb 可执行文件路径。
 /// - `serial`: 手机序列号。
 /// - `apk`: 本机 APK 路径。
-/// - `package`: APK 的包名（授权用）。
+/// - `package`: APK 的包名（授权、卸载用）。
 ///
 /// # 返回值
-/// 成功返回 `Ok(())`，安装或授权失败返回错误描述。
+/// 成功返回 `Ok(())`，安装失败返回错误描述。
 ///
 /// # 示例
 /// ```no_run
@@ -197,7 +220,16 @@ pub fn is_app_installed(adb_path: &Path, serial: &str) -> bool {
 /// ```
 pub fn install_and_grant(adb_path: &Path, serial: &str, apk: &Path, package: &str) -> Result<(), String> {
     let apk = apk.to_string_lossy();
-    run_adb(adb_path, &["-s", serial, "install", "-r", &apk])?;
+    let installed = |out: &Result<String, String>| matches!(out, Ok(o) if o.contains("Success"));
+
+    let mut out = run_adb(adb_path, &["-s", serial, "install", "-r", "-d", &apk]);
+    if !installed(&out) {
+        run_adb(adb_path, &["-s", serial, "uninstall", package])?;
+        out = run_adb(adb_path, &["-s", serial, "install", &apk]);
+    }
+    if !installed(&out) {
+        return Err(format!("安装 {package} 失败: {out:?}"));
+    }
     run_adb(adb_path, &["-s", serial, "shell", "pm", "grant", package, STOP_APP_PERMISSION])?;
     Ok(())
 }
