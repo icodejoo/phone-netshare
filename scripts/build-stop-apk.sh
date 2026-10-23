@@ -15,7 +15,7 @@ OUT="$ROOT/phone-stop/build"
 
 cd "$ROOT/phone-stop"
 rm -rf "$OUT" && mkdir -p "$OUT/classes" "$OUT/dex"
-javac --release 8 -Xlint:-options -cp "$JAR" -d "$OUT/classes" $(find src -name '*.java')
+javac -encoding UTF-8 --release 8 -Xlint:-options -cp "$JAR" -d "$OUT/classes" $(find src -name '*.java')
 java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 24 --lib "$JAR" \
   --output "$OUT/dex" $(find "$OUT/classes" -name '*.class')
 
