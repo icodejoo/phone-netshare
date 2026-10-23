@@ -39,6 +39,11 @@ jobs:
           Get-ChildItem $tmp -Recurse -File | Where-Object Name -in 'gnirehtet.exe', 'gnirehtet.apk' | Copy-Item -Destination app/assets -Force
           Get-ChildItem app/assets | Format-Table Name, Length
 
+      # 手机端「解除网络共享」小 App（纯 Java），嵌进 exe 并随 Release 单独发布
+      - name: 构建 phone-stop.apk
+        shell: bash
+        run: APK_OUT="$PWD/app/assets/phone-stop.apk" bash scripts/build-stop-apk.sh
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -70,6 +75,12 @@ jobs:
           path: app/target/release/phone-netshare.exe
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone-stop-apk
+          path: app/assets/phone-stop.apk
+          if-no-files-found: error
+
   # 只在推 v* 标签时发布
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -81,7 +92,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: phone-netshare-win-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: phone-stop-apk
       - name: 创建 Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" phone-netshare.exe --repo "$GITHUB_REPOSITORY" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" phone-netshare.exe phone-stop.apk --repo "$GITHUB_REPOSITORY" --generate-notes

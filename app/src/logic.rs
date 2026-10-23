@@ -17,6 +17,12 @@ pub const RELAY_PORT: u16 = 31416;
 /// 手机端 App 包名。
 pub const APP_PACKAGE: &str = "com.genymobile.gnirehtet";
 
+/// 「解除网络共享」小 App 的包名（本仓库 phone-stop 构建，随 exe 内嵌）。
+pub const STOP_APP_PACKAGE: &str = "dev.jelon.netshare.stop";
+
+/// 小 App 需要的特权权限（发 STOP 给 gnirehtet 必须），装好后由 adb 授予。
+pub const STOP_APP_PERMISSION: &str = "android.permission.WRITE_SECURE_SETTINGS";
+
 /// 手机端虚拟隧道网卡名称。
 pub const TUN_NAME: &str = "tun0";
 

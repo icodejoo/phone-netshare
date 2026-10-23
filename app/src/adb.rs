@@ -7,7 +7,7 @@ use std::process::Command;
 use crate::assets::CREATE_NO_WINDOW;
 use crate::logic::{
     convert_from_adb_devices, convert_from_key_value_lines, convert_to_phone_info, Phone,
-    PhoneInfo, APP_PACKAGE, INFO_PROPS, TUN_NAME,
+    PhoneInfo, APP_PACKAGE, INFO_PROPS, STOP_APP_PERMISSION, TUN_NAME,
 };
 
 /// 找不到 adb 时的标准中文提示文案。
@@ -136,6 +136,29 @@ pub fn test_sharing(adb_path: &Path, serial: &str) -> bool {
     }
 }
 
+/// 检查手机端是否已安装指定包名的应用。
+///
+/// # 参数
+/// - `adb_path`: adb 可执行文件路径。
+/// - `serial`: 手机序列号。
+/// - `package`: 应用包名。
+///
+/// # 返回值
+/// 若已安装返回 `true`，否则返回 `false`。
+///
+/// # 示例
+/// ```no_run
+/// use std::path::Path;
+/// use phone_netshare::adb::is_package_installed;
+/// let installed = is_package_installed(Path::new("adb.exe"), "ABC12345", "com.genymobile.gnirehtet");
+/// ```
+pub fn is_package_installed(adb_path: &Path, serial: &str, package: &str) -> bool {
+    match run_adb(adb_path, &["-s", serial, "shell", "pm", "list", "packages", package]) {
+        Ok(out) => out.lines().any(|l| l.trim() == format!("package:{package}")),
+        Err(_) => false,
+    }
+}
+
 /// 检查手机端是否已安装 gnirehtet 客户端应用。
 ///
 /// # 参数
@@ -152,10 +175,31 @@ pub fn test_sharing(adb_path: &Path, serial: &str) -> bool {
 /// let installed = is_app_installed(Path::new("adb.exe"), "ABC12345");
 /// ```
 pub fn is_app_installed(adb_path: &Path, serial: &str) -> bool {
-    match run_adb(adb_path, &["-s", serial, "shell", "pm", "list", "packages", APP_PACKAGE]) {
-        Ok(out) => out.contains(APP_PACKAGE),
-        Err(_) => false,
-    }
+    is_package_installed(adb_path, serial, APP_PACKAGE)
+}
+
+/// 给手机安装 APK，并授予小 App 所需的 `WRITE_SECURE_SETTINGS`。
+///
+/// # 参数
+/// - `adb_path`: adb 可执行文件路径。
+/// - `serial`: 手机序列号。
+/// - `apk`: 本机 APK 路径。
+/// - `package`: APK 的包名（授权用）。
+///
+/// # 返回值
+/// 成功返回 `Ok(())`，安装或授权失败返回错误描述。
+///
+/// # 示例
+/// ```no_run
+/// use std::path::Path;
+/// use phone_netshare::adb::install_and_grant;
+/// install_and_grant(Path::new("adb.exe"), "ABC12345", Path::new("phone-stop.apk"), "dev.jelon.netshare.stop").unwrap();
+/// ```
+pub fn install_and_grant(adb_path: &Path, serial: &str, apk: &Path, package: &str) -> Result<(), String> {
+    let apk = apk.to_string_lossy();
+    run_adb(adb_path, &["-s", serial, "install", "-r", &apk])?;
+    run_adb(adb_path, &["-s", serial, "shell", "pm", "grant", package, STOP_APP_PERMISSION])?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -41,6 +41,8 @@ scripts/install.ps1              下载校验 gnirehtet、建桌面快捷方式
 scripts/uninstall.ps1            卸载
 tests/run-tests.ps1              零依赖单测（不需要手机）
 docs/ios.md                      iOS 现状与路线
+phone-stop/                      手机端「解除网络共享」小 App（纯 Java，约 12 KB）
+scripts/build-stop-apk.sh        构建 phone-stop.apk（javac + d8 + aapt2，无需 Gradle）
 ```
 
 ## 自测与单测
@@ -52,7 +54,12 @@ pwsh -File tray\phone-netshare-tray.ps1 -SelfTest    # 真机自测：对每台�
 
 ## 手机端程序
 
-直接使用 gnirehtet 官方 Android App（`com.genymobile.gnirehtet`），由 gnirehtet 在启用时用 adb 安装，本仓库不分发 APK。
+- **gnirehtet 官方 App**（`com.genymobile.gnirehtet`）：由 gnirehtet 在启用时用 adb 安装，本仓库不分发。
+- **解除网络共享**（`dev.jelon.netshare.stop`，源码在 `phone-stop/`）：点手机上这个图标，就直接向 gnirehtet 发 STOP，不用再接电脑。
+  - 已打包进托盘 exe：**每次启用共享时探测手机有没有装，没有就自动 `adb install` 并授予 `WRITE_SECURE_SETTINGS`**（发 STOP 必需，只有 adb 能授），无需手动操作。安装失败不影响共享本身。
+  - 手动安装：`adb install bin/phone-stop.apk && adb shell pm grant dev.jelon.netshare.stop android.permission.WRITE_SECURE_SETTINGS`。
+  - 本地构建：`bash scripts/build-stop-apk.sh`（需要 `ANDROID_HOME` 和 JDK）。签名 key 为仓库内固定的 `phone-stop/stop.keystore`（口令 `android`，仅保证覆盖安装，不作安全用途）。
+  - CI 会先构建 APK 再嵌进 exe，推 `v*` 标签时 Release 同时附带 `phone-stop.apk`。
 
 ## 已知限制
 

@@ -7,9 +7,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::adb::{is_app_installed, test_sharing};
-use crate::assets::{run_gnirehtet, CREATE_NO_WINDOW};
-use crate::logic::{Phone, RELAY_PORT};
+use crate::adb::{install_and_grant, is_app_installed, is_package_installed, test_sharing};
+use crate::assets::{run_gnirehtet, CREATE_NO_WINDOW, STOP_APK_NAME};
+use crate::logic::{Phone, RELAY_PORT, STOP_APP_PACKAGE};
 
 /// 检测本机的 gnirehtet 中继服务是否已在监听（固定端口 31416）。
 ///
@@ -215,6 +215,13 @@ pub fn enable_phone(
                 "自动安装 gnirehtet App 失败：{}",
                 String::from_utf8_lossy(&out.stderr).trim()
             ));
+        }
+    }
+
+    // 「解除网络共享」小 App：尽力安装，失败不影响共享本身
+    if !is_package_installed(adb_path, serial, STOP_APP_PACKAGE) {
+        if let Some(dir) = gnirehtet_path.parent() {
+            let _ = install_and_grant(adb_path, serial, &dir.join(STOP_APK_NAME), STOP_APP_PACKAGE);
         }
     }
 

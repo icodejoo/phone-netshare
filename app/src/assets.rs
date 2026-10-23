@@ -16,6 +16,12 @@ pub const GNIREHTET_BYTES: &[u8] = include_bytes!("../assets/gnirehtet.exe");
 /// 编译期内嵌的 gnirehtet.apk（手机端 App，启用时检测到没装就由 gnirehtet install 推送）。
 pub const GNIREHTET_APK_BYTES: &[u8] = include_bytes!("../assets/gnirehtet.apk");
 
+/// 编译期内嵌的 phone-stop.apk（手机上一键解除共享的小 App，启用时缺失则自动安装）。
+pub const STOP_APK_BYTES: &[u8] = include_bytes!("../assets/phone-stop.apk");
+
+/// 小 App APK 释放后的文件名，与 gnirehtet.exe 同目录。
+pub const STOP_APK_NAME: &str = "phone-stop.apk";
+
 /// 获取内嵌 gnirehtet.exe 的只读字节切片。
 ///
 /// # 返回值
@@ -56,6 +62,7 @@ pub fn ensure_gnirehtet_extracted() -> Result<PathBuf, String> {
 
     // apk 必须和 exe 同目录，gnirehtet install 才找得到
     extract_if_changed(&target_dir, "gnirehtet.apk", GNIREHTET_APK_BYTES)?;
+    extract_if_changed(&target_dir, STOP_APK_NAME, STOP_APK_BYTES)?;
     extract_if_changed(&target_dir, "gnirehtet.exe", GNIREHTET_BYTES)
 }
 
@@ -120,5 +127,6 @@ mod tests {
         assert!(!GNIREHTET_BYTES.is_empty(), "内嵌 gnirehtet.exe 字节不能为空");
         let hash = compute_sha256(GNIREHTET_BYTES).expect("计算内嵌文件哈希失败");
         assert_eq!(hash.len(), 64, "SHA256 哈希应为 64 位字符");
+        assert!(!STOP_APK_BYTES.is_empty(), "内嵌 phone-stop.apk 字节不能为空");
     }
 }
