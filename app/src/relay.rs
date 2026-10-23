@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::adb::{get_installed_version_code, install_and_grant, is_app_installed, test_sharing};
+use crate::adb::{get_app_state, grant_permission, install_and_grant, is_app_installed, test_sharing};
 use crate::assets::{run_gnirehtet, CREATE_NO_WINDOW, STOP_APK_NAME};
 use crate::logic::{Phone, RELAY_PORT, STOP_APP_PACKAGE, STOP_APP_VERSION_CODE};
 
@@ -218,16 +218,41 @@ pub fn enable_phone(
         }
     }
 
-    // 「解除网络共享」小 App：未安装或版本与 exe 携带的不一致就强制覆盖；失败不影响共享本身
-    let installed = get_installed_version_code(adb_path, serial, STOP_APP_PACKAGE);
-    if installed != Some(STOP_APP_VERSION_CODE) {
-        if let Some(dir) = gnirehtet_path.parent() {
-            let _ = install_and_grant(adb_path, serial, &dir.join(STOP_APK_NAME), STOP_APP_PACKAGE);
-        }
+    // 「解除网络共享」小 App 尽力而为，失败不影响共享本身
+    if let Some(dir) = gnirehtet_path.parent() {
+        let _ = ensure_stop_app(adb_path, serial, &dir.join(STOP_APK_NAME));
     }
 
     run_gnirehtet(gnirehtet_path, adb_path, &["start", serial])?;
     Ok(())
+}
+
+/// 确保手机上的「解除网络共享」小 App 就绪：未安装或版本与 exe 携带的不一致就强制覆盖，
+/// 版本一致但缺授权就补授权，都没问题则不再多调 adb。
+///
+/// # 参数
+/// - `adb_path`: adb.exe 路径。
+/// - `serial`: 手机序列号。
+/// - `apk`: 释放到本机的 phone-stop.apk 路径。
+///
+/// # 返回值
+/// 成功返回 `Ok(())`，安装或授权失败返回错误描述。
+///
+/// # 示例
+/// ```no_run
+/// use std::path::Path;
+/// use phone_netshare::relay::ensure_stop_app;
+/// ensure_stop_app(Path::new("adb.exe"), "SN123", Path::new("phone-stop.apk")).unwrap();
+/// ```
+pub fn ensure_stop_app(adb_path: &Path, serial: &str, apk: &Path) -> Result<(), String> {
+    let state = get_app_state(adb_path, serial, STOP_APP_PACKAGE);
+    if state.version_code != Some(STOP_APP_VERSION_CODE) {
+        return install_and_grant(adb_path, serial, apk, STOP_APP_PACKAGE);
+    }
+    if state.secure_granted {
+        return Ok(());
+    }
+    grant_permission(adb_path, serial, STOP_APP_PACKAGE)
 }
 
 /// 对指定手机停止网络共享，若无其余手机在共享则自动关闭中继。

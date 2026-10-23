@@ -38,6 +38,25 @@ pub fn parse_version_code(dump: &str) -> Option<u32> {
     rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
 }
 
+/// 判断 dumpsys 输出里某权限是否已授予（形如 `<权限>: granted=true`）。
+///
+/// # 参数
+/// - `dump`: dumpsys 的标准输出。
+/// - `permission`: 权限全名。
+///
+/// # 返回值
+/// 已授予返回 `true`，否则 `false`。
+///
+/// # 示例
+/// ```
+/// use phone_netshare::logic::parse_permission_granted;
+/// assert!(parse_permission_granted("  android.permission.X: granted=true", "android.permission.X"));
+/// ```
+pub fn parse_permission_granted(dump: &str, permission: &str) -> bool {
+    let needle = format!("{permission}: granted=true");
+    dump.lines().any(|l| l.contains(&needle))
+}
+
 /// exe 携带的小 App 版本号（编译期取自 phone-stop 清单的 versionCode）。
 pub const STOP_APP_VERSION_CODE: u32 = {
     match u32::from_str_radix(env!("STOP_APP_VERSION_CODE"), 10) {
@@ -325,8 +344,6 @@ pub fn get_all_info_text(sharing: bool, info: &PhoneInfo) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_version_code;
-
     #[test]
     fn test_parse_version_code() {
         let dump = "Packages:
@@ -336,6 +353,14 @@ mod tests {
 ";
         assert_eq!(parse_version_code(dump), Some(7));
         assert_eq!(parse_version_code("Unable to find package: x"), None);
+    }
+
+    #[test]
+    fn test_parse_permission_granted() {
+        let perm = "android.permission.WRITE_SECURE_SETTINGS";
+        assert!(parse_permission_granted("      android.permission.WRITE_SECURE_SETTINGS: granted=true\n", perm));
+        assert!(!parse_permission_granted("      android.permission.WRITE_SECURE_SETTINGS: granted=false\n", perm));
+        assert!(!parse_permission_granted("", perm));
     }
 
     use super::*;

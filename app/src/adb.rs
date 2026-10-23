@@ -7,7 +7,7 @@ use std::process::Command;
 use crate::assets::CREATE_NO_WINDOW;
 use crate::logic::{
     convert_from_adb_devices, convert_from_key_value_lines, convert_to_phone_info, Phone,
-    PhoneInfo, parse_version_code, APP_PACKAGE, INFO_PROPS, STOP_APP_PERMISSION, TUN_NAME,
+    PhoneInfo, parse_permission_granted, parse_version_code, APP_PACKAGE, INFO_PROPS, STOP_APP_PERMISSION, TUN_NAME,
 };
 
 /// 找不到 adb 时的标准中文提示文案。
@@ -65,6 +65,37 @@ pub fn run_adb(adb_path: &Path, args: &[&str]) -> Result<String, String> {
         .map_err(|e| format!("运行 adb {:?} 失败: {e}", args))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(stdout)
+}
+
+/// 执行 adb 命令，退出码非 0 视为失败（与 [`run_adb`] 不同，后者只取 stdout）。
+///
+/// # 参数
+/// - `adb_path`: adb 可执行文件路径。
+/// - `args`: adb 参数列表。
+///
+/// # 返回值
+/// 成功返回 stdout；失败返回 stderr（为空时取 stdout）。
+///
+/// # 示例
+/// ```no_run
+/// use std::path::Path;
+/// use phone_netshare::adb::run_adb_checked;
+/// let out = run_adb_checked(Path::new("adb.exe"), &["version"]);
+/// ```
+pub fn run_adb_checked(adb_path: &Path, args: &[&str]) -> Result<String, String> {
+    let mut cmd = Command::new(adb_path);
+    cmd.args(args);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("运行 adb {:?} 失败: {e}", args))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() { stdout } else { stderr })
 }
 
 /// 获取当前连接且已授权的 Android 手机列表。
@@ -178,7 +209,16 @@ pub fn is_app_installed(adb_path: &Path, serial: &str) -> bool {
     is_package_installed(adb_path, serial, APP_PACKAGE)
 }
 
-/// 查询手机上已安装应用的 `versionCode`。
+/// 小 App 在手机上的安装状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppState {
+    /// 已安装版本的 `versionCode`；未安装为 `None`。
+    pub version_code: Option<u32>,
+    /// 是否已被授予 `WRITE_SECURE_SETTINGS`。
+    pub secure_granted: bool,
+}
+
+/// 一次查询手机上某应用的版本与特权授权状态（在手机端 grep 过滤，只回传几行）。
 ///
 /// # 参数
 /// - `adb_path`: adb 可执行文件路径。
@@ -186,22 +226,26 @@ pub fn is_app_installed(adb_path: &Path, serial: &str) -> bool {
 /// - `package`: 应用包名。
 ///
 /// # 返回值
-/// 已安装返回 `Some(versionCode)`；未安装或查询失败返回 `None`。
+/// 未安装或查询失败时 `version_code` 为 `None`、`secure_granted` 为 `false`。
 ///
 /// # 示例
 /// ```no_run
 /// use std::path::Path;
-/// use phone_netshare::adb::get_installed_version_code;
-/// let v = get_installed_version_code(Path::new("adb.exe"), "ABC12345", "dev.jelon.netshare.stop");
+/// use phone_netshare::adb::get_app_state;
+/// let st = get_app_state(Path::new("adb.exe"), "ABC12345", "dev.jelon.netshare.stop");
 /// ```
-pub fn get_installed_version_code(adb_path: &Path, serial: &str, package: &str) -> Option<u32> {
-    let out = run_adb(adb_path, &["-s", serial, "shell", "dumpsys", "package", package]).ok()?;
-    parse_version_code(&out)
+pub fn get_app_state(adb_path: &Path, serial: &str, package: &str) -> AppState {
+    let cmd = format!("dumpsys package {package} | grep -E 'versionCode=|{STOP_APP_PERMISSION}'");
+    let out = run_adb(adb_path, &["-s", serial, "shell", &cmd]).unwrap_or_default();
+    AppState {
+        version_code: parse_version_code(&out),
+        secure_granted: parse_permission_granted(&out, STOP_APP_PERMISSION),
+    }
 }
 
 /// 强制安装 APK 并授予小 App 所需的 `WRITE_SECURE_SETTINGS`。
 ///
-/// 先 `install -r -d` 覆盖（允许降级）；失败（如签名不一致）则卸载后重装。
+/// 先 `install -r -d` 覆盖（允许降级）；仅在签名冲突或降级被拒时才卸载重装，其他失败直接报错。
 ///
 /// # 参数
 /// - `adb_path`: adb 可执行文件路径。
@@ -210,7 +254,7 @@ pub fn get_installed_version_code(adb_path: &Path, serial: &str, package: &str) 
 /// - `package`: APK 的包名（授权、卸载用）。
 ///
 /// # 返回值
-/// 成功返回 `Ok(())`，安装失败返回错误描述。
+/// 成功返回 `Ok(())`，安装或授权失败返回错误描述。
 ///
 /// # 示例
 /// ```no_run
@@ -220,18 +264,36 @@ pub fn get_installed_version_code(adb_path: &Path, serial: &str, package: &str) 
 /// ```
 pub fn install_and_grant(adb_path: &Path, serial: &str, apk: &Path, package: &str) -> Result<(), String> {
     let apk = apk.to_string_lossy();
-    let installed = |out: &Result<String, String>| matches!(out, Ok(o) if o.contains("Success"));
+    if let Err(e) = run_adb_checked(adb_path, &["-s", serial, "install", "-r", "-d", &apk]) {
+        if !e.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE") && !e.contains("INSTALL_FAILED_VERSION_DOWNGRADE") {
+            return Err(format!("安装 {package} 失败: {e}"));
+        }
+        let _ = run_adb_checked(adb_path, &["-s", serial, "uninstall", package]);
+        run_adb_checked(adb_path, &["-s", serial, "install", &apk])
+            .map_err(|e| format!("卸载重装 {package} 失败: {e}"))?;
+    }
+    grant_permission(adb_path, serial, package)
+}
 
-    let mut out = run_adb(adb_path, &["-s", serial, "install", "-r", "-d", &apk]);
-    if !installed(&out) {
-        run_adb(adb_path, &["-s", serial, "uninstall", package])?;
-        out = run_adb(adb_path, &["-s", serial, "install", &apk]);
-    }
-    if !installed(&out) {
-        return Err(format!("安装 {package} 失败: {out:?}"));
-    }
-    run_adb(adb_path, &["-s", serial, "shell", "pm", "grant", package, STOP_APP_PERMISSION])?;
-    Ok(())
+/// 给已安装的小 App 授予 `WRITE_SECURE_SETTINGS`（重复授予无副作用）。
+///
+/// # 参数
+/// - `adb_path`: adb 可执行文件路径。
+/// - `serial`: 手机序列号。
+/// - `package`: 应用包名。
+///
+/// # 返回值
+/// 授权成功返回 `Ok(())`，失败返回 adb 的错误输出。
+///
+/// # 示例
+/// ```no_run
+/// use std::path::Path;
+/// use phone_netshare::adb::grant_permission;
+/// grant_permission(Path::new("adb.exe"), "ABC12345", "dev.jelon.netshare.stop").unwrap();
+/// ```
+pub fn grant_permission(adb_path: &Path, serial: &str, package: &str) -> Result<(), String> {
+    run_adb_checked(adb_path, &["-s", serial, "shell", "pm", "grant", package, STOP_APP_PERMISSION])
+        .map(|_| ())
 }
 
 #[cfg(test)]

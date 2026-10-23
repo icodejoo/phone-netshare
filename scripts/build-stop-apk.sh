@@ -9,6 +9,7 @@ SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
 JAR="$(ls -d "$SDK"/platforms/android-* | sort -V | tail -1)/android.jar"
 KS="${KEYSTORE:-$ROOT/phone-stop/stop.keystore}"
+PASS="pass:${KS_PASS:-android}"
 APK_OUT="${APK_OUT:-$ROOT/bin/phone-stop.apk}"
 OUT="$ROOT/phone-stop/build"
 
@@ -20,9 +21,9 @@ java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 24 --lib "
 
 "$BT/aapt2" compile --dir res -o "$OUT/res.zip"
 "$BT/aapt2" link -I "$JAR" --manifest AndroidManifest.xml -o "$OUT/base.apk" "$OUT/res.zip"
-(cd "$OUT/dex" && "$BT/aapt" add ../base.apk classes.dex >/dev/null)
+(cd "$OUT/dex" && "$BT/aapt" add ../base.apk classes.dex)
 "$BT/zipalign" -f -p 4 "$OUT/base.apk" "$OUT/aligned.apk"
 mkdir -p "$(dirname "$APK_OUT")"
-java -jar "$BT/lib/apksigner.jar" sign --ks "$KS" --ks-pass "pass:${KS_PASS:-android}" \
-  --out "$ROOT/bin/phone-stop.apk" "$OUT/aligned.apk"
+java -jar "$BT/lib/apksigner.jar" sign --ks "$KS" --ks-pass "$PASS" \
+  --key-pass "$PASS" --out "$APK_OUT" "$OUT/aligned.apk"
 echo "产物：$APK_OUT"
